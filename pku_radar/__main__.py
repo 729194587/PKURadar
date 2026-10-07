@@ -6,6 +6,7 @@ from .audit import audit
 from .observability import LiveObserver
 from .pipeline import run_pipeline
 from .digest import DigestBuilder
+from .email_writer import EmailWriter
 from .ranking import FakeRanker, LLMRanker, load_preferences
 from .source import FakeSource, PKUKnowSource, ROOT
 from .storage import Store
@@ -26,6 +27,7 @@ def main(argv=None):
     mode.add_argument("--fake-day", type=int, choices=(1, 2), default=1)
     mode.add_argument("--live", action="store_true", help="Fetch public notices and call the configured LLM")
     run.add_argument("--db")
+    run.add_argument("--email", action="store_true", help="Email the live digest using SMTP")
     run.add_argument("--preferences", default=ROOT / "config/preferences.yaml")
     run.add_argument("--max-rank-attempts", type=positive_int, default=3)
     run.add_argument("--rerank", action="store_true", help="Rerank every unsurfaced item in the database")
@@ -40,17 +42,23 @@ def main(argv=None):
         except Exception as exc:
             print(f"Audit failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             return 1
+    if args.email and not args.live:
+        parser.error("--email requires --live")
     args.db = args.db or ("data/pku_radar_live.db" if args.live else "data/pku_radar_offline.db")
     store = None
     try:
         store = Store(args.db)
-        observer = LiveObserver(secrets=(os.environ.get("LLM_API_KEY", "").strip(),)) if args.live else None
+        observer = LiveObserver(secrets=(os.environ.get("LLM_API_KEY", "").strip(),
+                                         os.environ.get("SMTP_PASSWORD", ""))) if args.live else None
+        email_writer = EmailWriter() if args.email else None
         # Configuration failures also belong to the persisted run lifecycle.
         class ConfiguredSource:
             def fetch(self):
                 nonlocal ranker
                 try:
                     preferences.update(load_preferences(args.preferences))
+                    if email_writer is not None:
+                        email_writer.configure()
                     if args.live:
                         ranker = LLMRanker.from_env()
                 finally:
@@ -71,7 +79,7 @@ def main(argv=None):
         preferences = {}
         ranker = FakeRanker()
         result = run_pipeline(store, ConfiguredSource(), ConfiguredRanker(), preferences,
-                              builder=DigestBuilder(live=args.live), observer=observer,
+                              builder=DigestBuilder(live=args.live), observer=observer, email_writer=email_writer,
                               max_rank_attempts=args.max_rank_attempts, rerank=args.rerank)
         print(f"Run {result['id']}: {result['status']}. Run log: {args.db} (runs table).", file=sys.stderr)
         if result["status"] != "success":

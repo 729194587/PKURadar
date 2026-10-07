@@ -7,7 +7,7 @@ from .source import SourceResult
 
 
 def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=None,
-                 builder=None, max_rank_attempts=3, rerank=False, observer=None):
+                 builder=None, max_rank_attempts=3, rerank=False, observer=None, email_writer=None):
     if max_rank_attempts < 1:
         raise ValueError("max_rank_attempts must be positive")
     writer = writer if writer is not None else TerminalWriter()
@@ -86,6 +86,20 @@ def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=No
         if source_incomplete:
             digest += "\n\nSource fetch was incomplete; some notices may be missing."
         writer.write(digest)
+        if email_writer is not None and rows:
+            delivery_started = perf_counter()
+            try:
+                email_writer.write(digest, now=now, recommendation_count=len(rows))
+            except Exception as exc:
+                if observer is not None:
+                    observer.emit("delivery_failed", channel="email", recommendation_count=len(rows),
+                                  duration_ms=(perf_counter() - delivery_started) * 1000,
+                                  error_type=type(exc).__name__, error_message=str(exc))
+                raise
+            else:
+                if observer is not None:
+                    observer.emit("delivery_finished", channel="email", recommendation_count=len(rows),
+                                  duration_ms=(perf_counter() - delivery_started) * 1000)
         status = "partial" if failures and counts["ranked"] else "failed" if failures else "success"
         if source_failed:
             status = "failed"

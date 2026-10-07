@@ -132,4 +132,38 @@ All automated tests use mocked transports and require no API credentials:
 python -m unittest discover -s tests -v
 ```
 
-No delivery service, scheduler, coverage health, batching, or other later-phase features.
+## Email delivery (live only)
+
+With the live LLM variables above configured, opt in to plain-text email:
+
+```powershell
+$env:SMTP_HOST="smtp.example.com"
+$env:SMTP_PORT="587"
+$env:SMTP_USER="you@example.com"
+$env:SMTP_PASSWORD="your-app-password"
+$env:RADAR_EMAIL_TO="recipient@example.com"
+
+python -m pku_radar run --live --email
+```
+
+All five SMTP/email variables are required only with `--email`. Optional
+`RADAR_EMAIL_FROM` defaults to `SMTP_USER`. Port 465 uses implicit TLS; other
+ports (typically 587) require STARTTLS, with certificate verification and a
+30-second socket timeout. Use your mail provider's app password / 授权码 for
+`SMTP_PASSWORD`. Do not commit `.env` or credentials; `.env` is not auto-loaded.
+
+The Digest still prints to stdout. Email uses UTF-8 plain text and the subject
+`PKU Radar · YYYY-MM-DD · N 条值得关注`, with Shanghai date and the number of
+shown recommendations (including previously unsent recommendations). Empty
+recommendations send no email and a normal empty run succeeds. Only successful
+delivery marks shown items surfaced. SMTP failure fails the run and leaves
+recommendations unsurfaced for a later run, without reranking successful items.
+SMTP acceptance is the delivery boundary; an ambiguous connection failure or
+a crash before database commit can result in a duplicate on retry.
+
+Traces add `delivery_finished` / `delivery_failed` with channel, recommendation
+count and duration; failures include a sanitized error type/message. SMTP
+responses and credentials are not logged. Without `--email`, live behavior is
+unchanged; offline mode rejects `--email`.
+
+No scheduler, WeChat delivery, or general notification framework is included.
