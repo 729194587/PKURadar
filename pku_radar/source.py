@@ -19,7 +19,8 @@ class SourceResult:
 
 
 class PKUKnowSource:
-    def __init__(self, *, opener=None, sleep=None):
+    def __init__(self, *, opener=None, sleep=None, on_page=None):
+        self.on_page = on_page
         self.opener = opener or urlopen
         self.sleep = sleep or time.sleep
 
@@ -29,6 +30,8 @@ class PKUKnowSource:
         for page in range(1, 4):
             if page > 1:
                 self.sleep(3)
+            started = time.perf_counter()
+            bad_items = 0
             params = dict(q="", category="全部通知", source="all", group="wechat,official",
                           intent="all", view="list", page=page)
             request = Request("https://pkuknow.cn/api/notices?" + urlencode(params),
@@ -42,6 +45,7 @@ class PKUKnowSource:
                     raise ValueError("response must be an object with an items list")
             except Exception as exc:
                 errors.append(f"Source page {page}: {type(exc).__name__}: {exc}")
+                self._observe(page, started, 0, 0, exc)
                 continue
             successful_pages += 1
             for index, raw in enumerate(payload["items"]):
@@ -57,8 +61,20 @@ class PKUKnowSource:
                         raise ValueError("ai_is_event must be a bool or null")
                     notices.append(Notice.from_raw(raw))
                 except Exception as exc:
+                    bad_items += 1
                     errors.append(f"Source page {page} item {index + 1}: {type(exc).__name__}: {exc}")
+            self._observe(page, started, len(payload["items"]), bad_items)
         return SourceResult(notices, errors, not errors, successful_pages)
+
+    def _observe(self, page, started, item_count, bad_item_count, error=None):
+        if self.on_page is not None:
+            try:
+                self.on_page(page=page, duration_ms=(time.perf_counter() - started) * 1000,
+                             item_count=item_count, bad_item_count=bad_item_count, success=error is None,
+                             **({"error_type": type(error).__name__, "error_message": str(error)}
+                                if error is not None else {}))
+            except Exception:
+                pass  # Page observation must not change source semantics.
 
 
 class FakeSource:

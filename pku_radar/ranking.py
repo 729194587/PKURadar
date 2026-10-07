@@ -44,6 +44,7 @@ class LLMRanker:
         return cls(*(values[name] for name in names))
 
     def rank(self, notice, preferences, current_datetime):
+        self.last_observation = {"usage": None}
         timestamp(current_datetime)  # Reject naive datetimes before timezone conversion.
         current_datetime = current_datetime.astimezone(ZoneInfo("Asia/Shanghai"))
         fields = ("title", "source_name", "category", "intent_group", "summary",
@@ -63,12 +64,23 @@ class LLMRanker:
             with self.opener(request, timeout=60) as response:
                 if not 200 <= response.status < 300:
                     raise ValueError(f"HTTP {response.status}")
-                content = json.load(response)["choices"][0]["message"]["content"]
+                payload = json.load(response)
+                usage = payload.get("usage")
+                if isinstance(usage, dict):
+                    self.last_observation["usage"] = {
+                        key: value if type(value := usage.get(key)) is int and value >= 0 else None
+                        for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+                content = payload["choices"][0]["message"]["content"]
         except Exception as exc:
             # Do not persist provider response bodies or request credentials in run logs.
             raise RuntimeError(f"LLM provider request failed ({type(exc).__name__})") from None
-        result = json.loads(content)
-        return asdict(Recommendation.validate(result))
+        try:
+            result = json.loads(content)
+            return asdict(Recommendation.validate(result))
+        except (ValueError, TypeError):
+            if isinstance(content, str):
+                self.last_observation["raw_output_preview"] = content[:2000]
+            raise
 
 
 def load_preferences(path):

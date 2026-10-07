@@ -99,6 +99,26 @@ are saved in `runs.error`, and the digest ends with:
 
 > Source fetch was incomplete; some notices may be missing.
 
+Live runs append and flush events to `data/traces/run-<run_id>.jsonl` and print
+page/ranking progress plus final timing and token totals to stderr. Digest output
+on stdout is unchanged. Offline runs do not create these traces or progress lines.
+Trace I/O failures warn on stderr without failing the pipeline.
+
+Events are `run_start` (configuration, preferences, prompt SHA-256),
+`source_page_finished` (page timing, item/bad-item counts, success or error),
+`ranking_finished` (identity, decision, timing, provider usage), `ranking_failed`
+(identity, timing, error and at most 2000 characters of invalid model output),
+and `run_finished` (status, timings, call/outcome counts and token sums).
+Page item counts include bad items; page success means the page decoded correctly,
+consistent with `SourceResult.successful_pages`. Source duration includes inter-page
+waits and configuration; individual page duration excludes the wait before a page.
+Token sums include usage returned on invalid model outputs, count only supplied
+fields, and remain null when unavailable; they are never estimated. The configured
+API key is redacted, and URL credentials/query/fragment, request headers and full
+provider response bodies are not recorded. Preferences and decision text remain
+local trace data. Run IDs are SQLite run IDs; reuse across databases appends another
+run segment to the same filename.
+
 All automated tests use mocked transports and require no API credentials:
 
 ```powershell

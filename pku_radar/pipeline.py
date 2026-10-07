@@ -1,4 +1,5 @@
 import json
+from time import perf_counter
 
 from .digest import DigestBuilder, TerminalWriter
 from .models import Notice, Recommendation, utc_now
@@ -6,18 +7,25 @@ from .source import SourceResult
 
 
 def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=None,
-                 builder=None, max_rank_attempts=3, rerank=False):
+                 builder=None, max_rank_attempts=3, rerank=False, observer=None):
     if max_rank_attempts < 1:
         raise ValueError("max_rank_attempts must be positive")
     writer = writer if writer is not None else TerminalWriter()
     builder = builder if builder is not None else DigestBuilder()
     now = clock()
     run_id = store.start_run(now)
+    if observer is not None:
+        observer.begin(run_id, now)
+    source_duration_ms = None
     counts = dict(fetched=0, new=0, ranked=0, recommended=0)
     errors = []
     failures = exhausted = 0
     try:
-        fetched = source.fetch()
+        source_started = perf_counter()
+        try:
+            fetched = source.fetch()
+        finally:
+            source_duration_ms = (perf_counter() - source_started) * 1000
         source_incomplete = isinstance(fetched, SourceResult) and not fetched.complete
         source_failed = isinstance(fetched, SourceResult) and fetched.successful_pages == 0
         if isinstance(fetched, SourceResult):
@@ -27,19 +35,27 @@ def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=No
             notices = list(fetched)
         counts["fetched"] = len(notices)
         counts["new"] = store.ingest(notices, now)
-        for row in store.candidates(max_rank_attempts, rerank):
+        candidates = store.candidates(max_rank_attempts, rerank)
+        for row in candidates:
             attempts = 0 if rerank else row["rank_attempts"]
             if rerank:
                 store.reset_attempts(row)
             notice = Notice.from_raw(json.loads(row["raw_json"]), row["provider"])
+            rank_started = perf_counter()
             try:
                 result = Recommendation.validate(ranker.rank(notice, preferences, now))
             except Exception as exc:
+                if observer is not None:
+                    observer.ranking(notice, (perf_counter() - rank_started) * 1000, len(candidates),
+                                     getattr(ranker, "last_observation", {}), error=exc)
                 failures += 1
                 error = f"{type(exc).__name__}: {exc}"
                 store.record_rank(row, now, error=error)
                 errors.append(f"{row['provider']}/{row['external_id']}: {error}")
             else:
+                if observer is not None:
+                    observer.ranking(notice, (perf_counter() - rank_started) * 1000, len(candidates),
+                                     getattr(ranker, "last_observation", {}), result=result)
                 store.record_rank(row, now, result=result)
                 counts["ranked"] += 1
                 counts["recommended"] += result.recommend
@@ -60,4 +76,7 @@ def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=No
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")
         store.finish_run(run_id, clock(), "failed", counts, errors)
-    return store.run(run_id)
+    result = store.run(run_id)
+    if observer is not None:
+        observer.finish(result["status"], source_duration_ms)
+    return result

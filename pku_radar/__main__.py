@@ -1,7 +1,9 @@
 import argparse
+import os
 import sys
 
 from .audit import audit
+from .observability import LiveObserver
 from .pipeline import run_pipeline
 from .digest import DigestBuilder
 from .ranking import FakeRanker, LLMRanker, load_preferences
@@ -42,24 +44,34 @@ def main(argv=None):
     store = None
     try:
         store = Store(args.db)
+        observer = LiveObserver(secrets=(os.environ.get("LLM_API_KEY", "").strip(),)) if args.live else None
         # Configuration failures also belong to the persisted run lifecycle.
         class ConfiguredSource:
             def fetch(self):
                 nonlocal ranker
-                preferences.update(load_preferences(args.preferences))
+                try:
+                    preferences.update(load_preferences(args.preferences))
+                    if args.live:
+                        ranker = LLMRanker.from_env()
+                finally:
+                    if observer is not None:
+                        observer.start(preferences, os.environ.get("LLM_MODEL"), os.environ.get("LLM_BASE_URL"))
                 if args.live:
-                    ranker = LLMRanker.from_env()
-                    return PKUKnowSource().fetch()
+                    return PKUKnowSource(on_page=observer.page).fetch()
                 return FakeSource(args.fake_day).fetch()
 
         class ConfiguredRanker:
+            @property
+            def last_observation(self):
+                return getattr(ranker, "last_observation", {})
+
             def rank(self, *values):
                 return ranker.rank(*values)
 
         preferences = {}
         ranker = FakeRanker()
         result = run_pipeline(store, ConfiguredSource(), ConfiguredRanker(), preferences,
-                              builder=DigestBuilder(live=args.live),
+                              builder=DigestBuilder(live=args.live), observer=observer,
                               max_rank_attempts=args.max_rank_attempts, rerank=args.rerank)
         print(f"Run {result['id']}: {result['status']}. Run log: {args.db} (runs table).", file=sys.stderr)
         if result["status"] != "success":
