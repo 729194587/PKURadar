@@ -18,8 +18,11 @@ def sort_key(row):
 
 
 class DigestBuilder:
+    def __init__(self, *, live=False):
+        self.marker = "[PKU RADAR LIVE]" if live else "[OFFLINE FIXTURE MODE]"
+
     def build(self, rows, counts, now, failed_count=0, exhausted_count=0):
-        lines = ["[OFFLINE FIXTURE MODE]", "", f"PKU Radar · {now.astimezone(ZoneInfo('Asia/Shanghai')):%Y-%m-%d}", ""]
+        lines = [self.marker, "", f"PKU Radar · {now.astimezone(ZoneInfo('Asia/Shanghai')):%Y-%m-%d}", ""]
         lines.extend(f"{name.title()}: {counts[name]}" for name in ("fetched", "new", "ranked", "recommended"))
         lines.extend([f"Shown: {len(rows)}", ""])
         for row in sorted(rows, key=sort_key):

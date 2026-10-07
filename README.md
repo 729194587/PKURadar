@@ -1,6 +1,6 @@
-# PKU Radar — Phase 1A
+# PKU Radar — Phase 2A
 
-Entirely offline: reads the preserved PKU Know fixture, persists lifecycle state
+Offline by default: reads the preserved PKU Know fixture, persists lifecycle state
 in SQLite, ranks with substring matching, and writes a terminal digest.
 Run from this workspace with Python 3.11+ and dependencies from `pyproject.toml`.
 
@@ -43,4 +43,66 @@ unchanged. FakeRanker matches title, summary, category and source name without
 case sensitivity: primary interests → high, secondary → medium, low interests
 or no match → not recommended. Upstream AI event labels remain auxiliary data.
 
-No real source client, LLM, delivery service, scheduler, or Phase 1B features.
+## First live digest
+
+Set these environment variables in the process running PKU Radar:
+
+- `LLM_BASE_URL`: your provider's OpenAI-compatible API base URL, including its
+  API prefix (for example `/v1`), without `/chat/completions`.
+- `LLM_API_KEY`: your provider credential, supplied through the environment.
+- `LLM_MODEL`: your provider's model identifier.
+
+No provider or model is hardcoded. All three variables are required for live mode;
+missing configuration produces a failed run with an explanatory error before
+network access. Offline mode requires none of them. `.env` is ignored by Git but
+is **not automatically loaded**; supply variables through your shell or secret
+manager. Do not put credentials in source, preferences, or committed files.
+
+```powershell
+python -m pku_radar run --live
+python -m pku_radar run --live --rerank
+```
+
+Live mode displays `[PKU RADAR LIVE]` and defaults to `data/pku_radar_live.db`.
+Offline mode keeps `[OFFLINE FIXTURE MODE]` and `data/pku_radar_offline.db`.
+`--db` overrides either default; use separate paths to keep fixture and live
+state apart. `--live` and `--fake-day` cannot be combined.
+
+The source reads exactly list pages 1–3 from `https://pkuknow.cn/api/notices`,
+serially with a three-second pause between requests, a 30-second timeout, and
+`PKURadar/0.2` User-Agent. Parameters are `q=`, `category=全部通知`, `source=all`,
+`group=wechat,official`, `intent=all`, `view=list`, and `page=1..3`. It does not
+stop on seen IDs or old publication dates, or fetch article bodies.
+
+Each candidate Notice makes one real LLM request to the configured base URL's
+`/chat/completions`, with a 60-second timeout and no in-call retries. The first run
+may make a few dozen to about 90 model calls, with corresponding latency and
+provider charges. Subsequent runs also retry eligible failed items outside the
+current source window. `--rerank` reevaluates all unsurfaced items and may make
+additional calls. The prompt includes the current timezone-aware datetime,
+all three preference groups and the Notice's content/event fields. It evaluates
+interest, remaining action value and whether an active reminder is warranted;
+ended events and expired deadlines are excluded, while uncertain dates and a
+false upstream event label do not automatically exclude long-term opportunities.
+Reasons are short Chinese explanations grounded in the provided content.
+Plain JSON output is validated with the existing Recommendation validator;
+invalid JSON/schema and provider errors enter the existing per-item retry lifecycle.
+
+`SourceResult` carries notices, errors, completeness and the number of successfully
+decoded pages. A failed page or malformed item does not discard other valid items.
+Their raw upstream JSON is retained unchanged in meaning. An incomplete fetch
+makes a run at least partial; all three page failures make it failed, even if
+previously queued items can still be processed. Successfully decoded empty pages
+are valid, so zero recommendations can still be a success. A page containing bad
+items counts as decoded but makes the fetch incomplete. Detailed source errors
+are saved in `runs.error`, and the digest ends with:
+
+> Source fetch was incomplete; some notices may be missing.
+
+All automated tests use mocked transports and require no API credentials:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+No delivery service, scheduler, coverage health, batching, or other later-phase features.

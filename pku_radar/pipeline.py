@@ -2,6 +2,7 @@ import json
 
 from .digest import DigestBuilder, TerminalWriter
 from .models import Notice, Recommendation, utc_now
+from .source import SourceResult
 
 
 def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=None,
@@ -16,7 +17,14 @@ def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=No
     errors = []
     failures = exhausted = 0
     try:
-        notices = list(source.fetch())
+        fetched = source.fetch()
+        source_incomplete = isinstance(fetched, SourceResult) and not fetched.complete
+        source_failed = isinstance(fetched, SourceResult) and fetched.successful_pages == 0
+        if isinstance(fetched, SourceResult):
+            errors.extend(fetched.errors)
+            notices = fetched.notices
+        else:
+            notices = list(fetched)
         counts["fetched"] = len(notices)
         counts["new"] = store.ingest(notices, now)
         for row in store.candidates(max_rank_attempts, rerank):
@@ -39,8 +47,15 @@ def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=No
                 exhausted += 1
                 errors.append(f"{row['provider']}/{row['external_id']}: reached max_rank_attempts")
         rows = store.recommendations()
-        writer.write(builder.build(rows, counts, now, failures, exhausted))
+        digest = builder.build(rows, counts, now, failures, exhausted)
+        if source_incomplete:
+            digest += "\n\nSource fetch was incomplete; some notices may be missing."
+        writer.write(digest)
         status = "partial" if failures and counts["ranked"] else "failed" if failures else "success"
+        if source_failed:
+            status = "failed"
+        elif source_incomplete and status == "success":
+            status = "partial"
         store.finish_run(run_id, clock(), status, counts, errors, rows)
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")

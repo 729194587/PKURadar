@@ -1,9 +1,64 @@
 import json
+import time
+from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from .models import Notice
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+@dataclass
+class SourceResult:
+    notices: list[Notice]
+    errors: list[str]
+    complete: bool
+    successful_pages: int
+
+
+class PKUKnowSource:
+    def __init__(self, *, opener=None, sleep=None):
+        self.opener = opener or urlopen
+        self.sleep = sleep or time.sleep
+
+    def fetch(self):
+        notices, errors = [], []
+        successful_pages = 0
+        for page in range(1, 4):
+            if page > 1:
+                self.sleep(3)
+            params = dict(q="", category="全部通知", source="all", group="wechat,official",
+                          intent="all", view="list", page=page)
+            request = Request("https://pkuknow.cn/api/notices?" + urlencode(params),
+                              headers={"User-Agent": "PKURadar/0.2"})
+            try:
+                with self.opener(request, timeout=30) as response:
+                    if not 200 <= response.status < 300:
+                        raise ValueError(f"HTTP {response.status}")
+                    payload = json.load(response)
+                if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+                    raise ValueError("response must be an object with an items list")
+            except Exception as exc:
+                errors.append(f"Source page {page}: {type(exc).__name__}: {exc}")
+                continue
+            successful_pages += 1
+            for index, raw in enumerate(payload["items"]):
+                try:
+                    # Validate mapped types before SQLite ingestion so one bad item stays isolated.
+                    if not isinstance(raw, dict) or type(raw.get("id")) not in (str, int) or not str(raw["id"]).strip():
+                        raise ValueError("item requires a nonempty string or integer id")
+                    for field in ("source_id", "source_name", "title", "published_at", "url",
+                                  "category", "intent_group", "ai_summary", "ai_event_time", "ai_event_location"):
+                        if raw.get(field) is not None and not isinstance(raw[field], str):
+                            raise ValueError(f"{field} must be a string or null")
+                    if raw.get("ai_is_event") is not None and type(raw["ai_is_event"]) is not bool:
+                        raise ValueError("ai_is_event must be a bool or null")
+                    notices.append(Notice.from_raw(raw))
+                except Exception as exc:
+                    errors.append(f"Source page {page} item {index + 1}: {type(exc).__name__}: {exc}")
+        return SourceResult(notices, errors, not errors, successful_pages)
 
 
 class FakeSource:
