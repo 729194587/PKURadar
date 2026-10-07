@@ -1,0 +1,86 @@
+[
+  {
+    "name": "list1",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=activity&page=1&view=list",
+    "time": "2026-10-07T05:18:12.135451+00:00",
+    "status": 200,
+    "bytes": 104697
+  },
+  {
+    "name": "list2",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=activity&page=2&view=list",
+    "time": "2026-10-07T05:18:15.965438+00:00",
+    "status": 200,
+    "bytes": 103703
+  },
+  {
+    "name": "list3",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=activity&page=3&view=list",
+    "time": "2026-10-07T05:18:19.747266+00:00",
+    "status": 200,
+    "bytes": 105585
+  },
+  {
+    "name": "board1",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=activity&page=1&view=board",
+    "time": "2026-10-07T05:18:23.509845+00:00",
+    "status": 200,
+    "bytes": 190146
+  },
+  {
+    "name": "board2",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=activity&page=2&view=board",
+    "time": "2026-10-07T05:18:27.504745+00:00",
+    "status": 200,
+    "bytes": 190146
+  },
+  {
+    "name": "intent_all",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=all&page=1&view=list",
+    "time": "2026-10-07T05:18:58.984428+00:00",
+    "status": 200,
+    "bytes": 104977
+  },
+  {
+    "name": "category_lecture",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E8%AE%B2%E5%BA%A7%E6%B4%BB%E5%8A%A8&source=all&group=wechat%2Cofficial&intent=activity&page=1&view=list",
+    "time": "2026-10-07T05:19:02.848666+00:00",
+    "status": 200,
+    "bytes": 106640
+  },
+  {
+    "name": "group_official",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=official&intent=activity&page=1&view=list",
+    "time": "2026-10-07T05:19:06.471083+00:00",
+    "status": 200,
+    "bytes": 103754
+  },
+  {
+    "name": "source_one",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=weixinzs_422816432&group=wechat%2Cofficial&intent=activity&page=1&view=list",
+    "time": "2026-10-07T05:19:09.997773+00:00",
+    "status": 200,
+    "bytes": 85727
+  },
+  {
+    "name": "all2",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=all&page=2&view=list",
+    "time": "2026-10-07T05:19:56.368005+00:00",
+    "status": 200,
+    "bytes": 106760
+  },
+  {
+    "name": "all3",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=all&page=3&view=list",
+    "time": "2026-10-07T05:20:00.237447+00:00",
+    "status": 200,
+    "bytes": 105788
+  },
+  {
+    "name": "list1_repeat",
+    "url": "https://pkuknow.cn/api/notices?q=&category=%E5%85%A8%E9%83%A8%E9%80%9A%E7%9F%A5&source=all&group=wechat%2Cofficial&intent=activity&page=1&view=list",
+    "time": "2026-10-07T05:20:04.085964+00:00",
+    "status": 200,
+    "bytes": 104697
+  }
+]
