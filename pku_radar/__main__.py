@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+from .audit import audit
 from .pipeline import run_pipeline
 from .digest import DigestBuilder
 from .ranking import FakeRanker, LLMRanker, load_preferences
@@ -26,7 +27,17 @@ def main(argv=None):
     run.add_argument("--preferences", default=ROOT / "config/preferences.yaml")
     run.add_argument("--max-rank-attempts", type=positive_int, default=3)
     run.add_argument("--rerank", action="store_true", help="Rerank every unsurfaced item in the database")
+    review = commands.add_parser("audit", help="Review stored ranking decisions without reranking")
+    review.add_argument("--db", default="data/pku_radar_live.db")
+    review.add_argument("--output", help="Write the full audit as UTF-8 Markdown")
     args = parser.parse_args(argv)
+    if args.command == "audit":
+        try:
+            audit(args.db, args.output)
+            return 0
+        except Exception as exc:
+            print(f"Audit failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
     args.db = args.db or ("data/pku_radar_live.db" if args.live else "data/pku_radar_offline.db")
     store = None
     try:
