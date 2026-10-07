@@ -36,32 +36,51 @@ def run_pipeline(store, source, ranker, preferences, *, clock=utc_now, writer=No
         counts["fetched"] = len(notices)
         counts["new"] = store.ingest(notices, now)
         candidates = store.candidates(max_rank_attempts, rerank)
+        # Keep IDs unambiguous across providers while capping requests at 15 items.
+        batches = []
         for row in candidates:
-            attempts = 0 if rerank else row["rank_attempts"]
+            if not batches or len(batches[-1]) == 15 or batches[-1][0]["provider"] != row["provider"]:
+                batches.append([])
+            batches[-1].append(row)
+        for batch_index, batch in enumerate(batches, 1):
+            batch_notices = [Notice.from_raw(json.loads(row["raw_json"]), row["provider"]) for row in batch]
             if rerank:
-                store.reset_attempts(row)
-            notice = Notice.from_raw(json.loads(row["raw_json"]), row["provider"])
+                for row in batch:
+                    store.reset_attempts(row)
             rank_started = perf_counter()
             try:
-                result = Recommendation.validate(ranker.rank(notice, preferences, now))
+                results = ranker.rank_batch(batch_notices, preferences, now)
             except Exception as exc:
-                if observer is not None:
-                    observer.ranking(notice, (perf_counter() - rank_started) * 1000, len(candidates),
-                                     getattr(ranker, "last_observation", {}), error=exc)
-                failures += 1
-                error = f"{type(exc).__name__}: {exc}"
-                store.record_rank(row, now, error=error)
-                errors.append(f"{row['provider']}/{row['external_id']}: {error}")
-            else:
-                if observer is not None:
-                    observer.ranking(notice, (perf_counter() - rank_started) * 1000, len(candidates),
-                                     getattr(ranker, "last_observation", {}), result=result)
-                store.record_rank(row, now, result=result)
-                counts["ranked"] += 1
-                counts["recommended"] += result.recommend
-            if attempts + 1 == max_rank_attempts:
-                exhausted += 1
-                errors.append(f"{row['provider']}/{row['external_id']}: reached max_rank_attempts")
+                results = {notice.external_id: exc for notice in batch_notices}
+            duration_ms = (perf_counter() - rank_started) * 1000
+            metadata = getattr(ranker, "last_observation", {})
+            item_failures = 0
+            for row, notice in zip(batch, batch_notices):
+                attempts = 0 if rerank else row["rank_attempts"]
+                try:
+                    output = results[notice.external_id]
+                    if isinstance(output, Exception):
+                        raise output
+                    result = Recommendation.validate(output)
+                except Exception as exc:
+                    if observer is not None:
+                        observer.ranking(notice, error=exc)
+                    failures += 1
+                    item_failures += 1
+                    error = f"{type(exc).__name__}: {exc}"
+                    store.record_rank(row, now, error=error)
+                    errors.append(f"{row['provider']}/{row['external_id']}: {error}")
+                else:
+                    if observer is not None:
+                        observer.ranking(notice, result=result)
+                    store.record_rank(row, now, result=result)
+                    counts["ranked"] += 1
+                    counts["recommended"] += result.recommend
+                if attempts + 1 == max_rank_attempts:
+                    exhausted += 1
+                    errors.append(f"{row['provider']}/{row['external_id']}: reached max_rank_attempts")
+            if observer is not None:
+                observer.batch(duration_ms, batch_index, len(batches), len(batch), metadata, item_failures)
         rows = store.recommendations()
         digest = builder.build(rows, counts, now, failures, exhausted)
         if source_incomplete:

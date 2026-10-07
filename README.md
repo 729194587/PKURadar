@@ -74,19 +74,23 @@ serially with a three-second pause between requests, a 30-second timeout, and
 `group=wechat,official`, `intent=all`, `view=list`, and `page=1..3`. It does not
 stop on seen IDs or old publication dates, or fetch article bodies.
 
-Each candidate Notice makes one real LLM request to the configured base URL's
-`/chat/completions`, with a 60-second timeout and no in-call retries. The first run
-may make a few dozen to about 90 model calls, with corresponding latency and
-provider charges. Subsequent runs also retry eligible failed items outside the
-current source window. `--rerank` reevaluates all unsurfaced items and may make
-additional calls. The prompt includes the current timezone-aware datetime,
-all three preference groups and the Notice's content/event fields. It evaluates
+Candidates are ranked sequentially in batches of at most 15 (separated by provider
+so external IDs stay unambiguous). Each batch makes one real LLM request to
+`/chat/completions`, with a 60-second timeout, thinking explicitly disabled, and
+no in-call retries. For example, 90 candidates from one provider take six calls.
+Subsequent runs retry eligible failed items outside the current source window.
+`--rerank` reevaluates all unsurfaced items. The prompt includes the current timezone-aware datetime,
+all three preference groups and each Notice's external ID and content/event fields. It evaluates
 interest, remaining action value and whether an active reminder is warranted;
 ended events and expired deadlines are excluded, while uncertain dates and a
 false upstream event label do not automatically exclude long-term opportunities.
 Reasons are short Chinese explanations grounded in the provided content.
-Plain JSON output is validated with the existing Recommendation validator;
-invalid JSON/schema and provider errors enter the existing per-item retry lifecycle.
+The response must be a JSON array mapped by external ID, with each decision
+validated by the existing Recommendation validator. Invalid or missing decisions
+fail only the affected items; duplicate IDs fail that item without overwriting it.
+Unknown IDs are traced and ignored. Valid attributable decisions are preserved.
+Provider failures or unparseable/non-array responses fail every item in the batch.
+Attempts, cross-run retries, persistence, reranking and surfacing remain per item.
 
 `SourceResult` carries notices, errors, completeness and the number of successfully
 decoded pages. A failed page or malformed item does not discard other valid items.
@@ -99,15 +103,16 @@ are saved in `runs.error`, and the digest ends with:
 
 > Source fetch was incomplete; some notices may be missing.
 
-Live runs append and flush events to `data/traces/run-<run_id>.jsonl` and print
+Live runs write and flush events to `data/traces/run-<timestamp>-<run_id>.jsonl` and print
 page/ranking progress plus final timing and token totals to stderr. Digest output
 on stdout is unchanged. Offline runs do not create these traces or progress lines.
 Trace I/O failures warn on stderr without failing the pipeline.
 
 Events are `run_start` (configuration, preferences, prompt SHA-256),
 `source_page_finished` (page timing, item/bad-item counts, success or error),
-`ranking_finished` (identity, decision, timing, provider usage), `ranking_failed`
-(identity, timing, error and at most 2000 characters of invalid model output),
+`ranking_batch_finished` (batch index/size, timing, provider usage, success, item
+outcome counts, protocol errors and at most 2000 characters of invalid output),
+`ranking_finished` (identity, title, decision), `ranking_failed` (identity, title, error),
 and `run_finished` (status, timings, call/outcome counts and token sums).
 Page item counts include bad items; page success means the page decoded correctly,
 consistent with `SourceResult.successful_pages`. Source duration includes inter-page
@@ -116,8 +121,10 @@ Token sums include usage returned on invalid model outputs, count only supplied
 fields, and remain null when unavailable; they are never estimated. The configured
 API key is redacted, and URL credentials/query/fragment, request headers and full
 provider response bodies are not recorded. Preferences and decision text remain
-local trace data. Run IDs are SQLite run IDs; reuse across databases appends another
-run segment to the same filename.
+local trace data. Filenames include a wall-clock nanosecond timestamp and are
+created exclusively, preventing append mixing across databases with the same run ID.
+LLM calls and usage count actual batch requests, never individual items; ranking
+duration sums batch durations. No per-item token usage is estimated.
 
 All automated tests use mocked transports and require no API credentials:
 

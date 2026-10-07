@@ -3,7 +3,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, time_ns
 from urllib.parse import urlsplit, urlunsplit
 
 from .ranking import RANKING_PROMPT
@@ -36,10 +36,10 @@ class LiveObserver:
     def begin(self, run_id, now):
         self.run_id, self.timestamp = run_id, now.isoformat()
         self.started = perf_counter()
-        self.path = self.directory / f"run-{run_id}.jsonl"
+        self.path = self.directory / f"run-{time_ns()}-{run_id}.jsonl"
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
-            self.stream = self.path.open("a", encoding="utf-8")
+            self.stream = self.path.open("x", encoding="utf-8")
         except Exception:
             self.progress("Warning: trace file unavailable")
 
@@ -77,8 +77,8 @@ class LiveObserver:
         self.progress(f"[source] page {fields['page']}/3:{state} {fields['item_count']} items, "
                       f"{fields['bad_item_count']} bad, {fields['duration_ms'] / 1000:.2f}s")
 
-    def ranking(self, notice, duration_ms, total, metadata, *, result=None, error=None):
-        self.calls += 1
+    def batch(self, duration_ms, index, total, size, metadata, failures):
+        self.calls += metadata.get("provider_calls", 1)
         self.ranking_ms += duration_ms
         usage = metadata.get("usage")
         if isinstance(usage, dict):
@@ -89,20 +89,24 @@ class LiveObserver:
                     value = details.get(key) if isinstance(details, dict) else None
                 if type(value) is int and value >= 0:
                     self.tokens[key] = (self.tokens[key] or 0) + value
-        fields = dict(external_id=notice.external_id, title=notice.title, duration_ms=duration_ms)
+        self.emit("ranking_batch_finished", batch_index=index, batch_size=size,
+                  duration_ms=duration_ms, usage=usage, success=not failures and not metadata.get("protocol_errors"),
+                  succeeded=size - failures, failed=failures,
+                  protocol_errors=metadata.get("protocol_errors", []),
+                  **({"raw_output_preview": metadata["raw_output_preview"]}
+                     if "raw_output_preview" in metadata else {}))
+        self.progress(f"[rank batch {index}/{total}] {size} items, {duration_ms / 1000:.2f}s"
+                      + (f", {failures} failed" if failures else ""))
+
+    def ranking(self, notice, *, result=None, error=None):
+        fields = dict(external_id=notice.external_id, title=notice.title)
         if error is None:
             self.succeeded += 1
             self.emit("ranking_finished", **fields, recommend=result.recommend,
-                      priority=result.priority, reason=result.reason, usage=usage)
-            label = result.priority.upper() if result.recommend else "skip"
+                      priority=result.priority, reason=result.reason)
         else:
             self.failed += 1
-            preview = metadata.get("raw_output_preview")
-            self.emit("ranking_failed", **fields, usage=usage, error_type=type(error).__name__,
-                      error_message=str(error), **({"raw_output_preview": preview} if preview is not None else {}))
-            label = "ERROR"
-        title = " ".join((notice.title or "").split())
-        self.progress(f"[rank {self.calls}/{total}] {label:<6} {duration_ms / 1000:.2f}s  {title}")
+            self.emit("ranking_failed", **fields, error_type=type(error).__name__, error_message=str(error))
 
     def finish(self, status, source_duration_ms):
         total_ms = (perf_counter() - self.started) * 1000

@@ -115,7 +115,7 @@ class LiveTests(unittest.TestCase):
     def test_ranker_success_and_request(self):
         for recommend, priority in [(True, "high"), (False, None)]:
             expected = dict(recommend=recommend, priority=priority, reason="与你关注的方向相关。")
-            opener = Mock(return_value=model_response(json.dumps(expected)))
+            opener = Mock(return_value=model_response(json.dumps([dict(expected, external_id="one")])))
             ranker = LLMRanker("https://example.test/v1/", "", "configured-model", opener=opener)
             self.assertEqual(ranker.rank(notice(), PREFS, NOW), expected)
             request = opener.call_args.args[0]
@@ -130,7 +130,7 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(payload["current_datetime"], "2026-10-07T16:00:00+08:00")
             self.assertIn("PKU 活动和截止时间默认按 Asia/Shanghai 解读，除非通知明确指定其他时区。",
                           body["messages"][0]["content"])
-            self.assertEqual(set(payload["notice"]), {"title", "source_name", "category", "intent_group",
+            self.assertEqual(set(payload["notices"][0]), {"external_id", "title", "source_name", "category", "intent_group",
                 "summary", "upstream_is_event", "event_time_text", "event_location", "url"})
 
     def test_ranker_failures_retry_across_runs(self):
@@ -139,7 +139,7 @@ class LiveTests(unittest.TestCase):
                     model_response('```json\n{}\n```')]:
             with self.subTest(bad=bad):
                 opener = Mock(side_effect=[bad, model_response(
-                    '{"recommend": true, "priority": "high", "reason": "相关机会"}')])
+                    '[{"external_id": "one", "recommend": true, "priority": "high", "reason": "相关机会"}]')])
                 ranker = LLMRanker("https://example.test/v1", "", "model", opener=opener)
                 store = Store(":memory:")
                 try:

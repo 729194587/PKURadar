@@ -30,7 +30,18 @@ class ObservabilityTests(unittest.TestCase):
         key = 'dummy-test-credential'
         ranker = LLMRanker('https://example.test/v1', key, 'test-model',
                            opener=Mock(side_effect=[response(output) for output in outputs]))
-        pages = pages or [response({'items': [{'id': str(i), 'title': 'AI'} for i in range(len(outputs))]}),
+        # Each scripted output now represents 15 items in one provider call.
+        for index, output in enumerate(outputs):
+            content = output['choices'][0]['message']['content']
+            try:
+                item = json.loads(content)
+                if isinstance(item, dict):
+                    output['choices'][0]['message']['content'] = json.dumps([
+                        dict(item, external_id=f'{i:03}') for i in range(index * 15, (index + 1) * 15)])
+            except ValueError:
+                pass
+        ranker.opener = Mock(side_effect=[response(output) for output in outputs])
+        pages = pages or [response({'items': [{'id': f'{i:03}', 'title': 'AI'} for i in range(len(outputs) * 15)]}),
                           response({'items': []}), response({'items': []})]
         source = PKUKnowSource(opener=Mock(side_effect=pages), sleep=Mock())
         original_fetch = PKUKnowSource.fetch
@@ -63,15 +74,16 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(events[0]['ranking_prompt_sha256'], hashlib.sha256(RANKING_PROMPT.encode()).hexdigest())
         self.assertIn('primary_interests', events[0]['preferences'])
         ranks = [e for e in events if e['event'] == 'ranking_finished']
-        self.assertEqual(len(ranks), 2)
+        self.assertEqual(len(ranks), 30)
+        ranks = [e for e in events if e['event'] == 'ranking_batch_finished']
         self.assertEqual(ranks[0]['usage'], dict(usage, prompt_cache_hit_tokens=None,
                          prompt_cache_miss_tokens=None, completion_tokens_details={'reasoning_tokens': None}))
         for field in ('prompt_cache_hit_tokens', 'prompt_cache_miss_tokens', 'reasoning_tokens'):
             self.assertIsNone(events[-1][field])
         self.assertEqual(events[-1]['total_tokens'], 30)
-        self.assertEqual(events[-1]['ranking_succeeded'], 2)
-        self.assertIn('[source] page 1/3: 2 items, 0 bad', stderr)
-        self.assertIn('[rank 1/2] HIGH', stderr)
+        self.assertEqual(events[-1]['ranking_succeeded'], 30)
+        self.assertIn('[source] page 1/3: 30 items, 0 bad', stderr)
+        self.assertIn('[rank batch 1/2] 15 items', stderr)
         self.assertIn('LLM calls: 2', stderr)
         self.assertIn('Trace:', stderr)
         self.assertNotIn('[rank', stdout)
@@ -81,7 +93,7 @@ class ObservabilityTests(unittest.TestCase):
     def test_missing_usage(self):
         status, events, _, _ = self.live([self.output()])
         self.assertEqual(status, 0)
-        self.assertIsNone(next(e for e in events if e['event'] == 'ranking_finished')['usage'])
+        self.assertIsNone(next(e for e in events if e['event'] == 'ranking_batch_finished')['usage'])
         for field in ('prompt_tokens', 'completion_tokens', 'total_tokens',
                       'prompt_cache_hit_tokens', 'prompt_cache_miss_tokens', 'reasoning_tokens'):
             self.assertIsNone(events[-1][field])
@@ -96,7 +108,7 @@ class ObservabilityTests(unittest.TestCase):
         status, events, _, _ = self.live([
             self.output(usage=first), self.output('invalid JSON', second), self.output()])
         self.assertEqual(status, 1)
-        ranks = [e for e in events if e['event'] in ('ranking_finished', 'ranking_failed')]
+        ranks = [e for e in events if e['event'] == 'ranking_batch_finished']
         self.assertEqual(ranks[0]['usage'], first)
         self.assertEqual(ranks[1]['usage'], second)
         self.assertIsNone(ranks[2]['usage'])
@@ -114,6 +126,7 @@ class ObservabilityTests(unittest.TestCase):
             self.output(usage={'completion_tokens_details': None})])
         self.assertEqual(status, 0)
         ranks = [e for e in events if e['event'] == 'ranking_finished']
+        ranks = [e for e in events if e['event'] == 'ranking_batch_finished']
         self.assertEqual(ranks[0]['usage']['prompt_cache_hit_tokens'], 0)
         self.assertIsNone(ranks[1]['usage']['prompt_cache_hit_tokens'])
         for rank in ranks:
@@ -132,10 +145,11 @@ class ObservabilityTests(unittest.TestCase):
             self.output()])
         self.assertEqual(status, 1)
         failed = [e for e in events if e['event'] == 'ranking_failed']
-        self.assertEqual(len(failed), 2)
+        self.assertEqual(len(failed), 30)
         self.assertEqual(failed[0]['error_type'], 'JSONDecodeError')
-        self.assertLessEqual(len(failed[0]['raw_output_preview']), 2000)
-        self.assertIn('raw_output_preview', failed[1])
+        batches = [e for e in events if e['event'] == 'ranking_batch_finished']
+        self.assertLessEqual(len(batches[0]['raw_output_preview']), 2000)
+        self.assertIn('raw_output_preview', batches[1])
         self.assertNotIn('dummy-test-credential', json.dumps(events) + stderr)
         self.assertNotIn('raw_output_preview', next(e for e in events if e['event'] == 'ranking_finished'))
         self.assertEqual(events[-1]['total_tokens'], 10)
@@ -198,7 +212,7 @@ class ObservabilityTests(unittest.TestCase):
             ranker.rank(notice(), PREFS, NOW)
         with self.assertRaisesRegex(RuntimeError, r'^LLM provider request failed \(RuntimeError\)$'):
             ranker.rank(notice(), PREFS, NOW)
-        self.assertEqual(ranker.last_observation, {'usage': None})
+        self.assertEqual(ranker.last_observation, {'usage': None, 'provider_calls': 1})
 
     def test_digest_failure_still_finishes_trace(self):
         from pku_radar.digest import TerminalWriter
@@ -207,4 +221,4 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(events[-1]['event'], 'run_finished')
         self.assertEqual(events[-1]['status'], 'failed')
-        self.assertEqual(events[-1]['ranking_succeeded'], 1)
+        self.assertEqual(events[-1]['ranking_succeeded'], 15)

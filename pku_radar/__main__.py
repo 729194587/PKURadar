@@ -65,8 +65,8 @@ def main(argv=None):
             def last_observation(self):
                 return getattr(ranker, "last_observation", {})
 
-            def rank(self, *values):
-                return ranker.rank(*values)
+            def rank_batch(self, *values):
+                return ranker.rank_batch(*values)
 
         preferences = {}
         ranker = FakeRanker()
