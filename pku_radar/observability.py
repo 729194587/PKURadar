@@ -9,7 +9,8 @@ from urllib.parse import urlsplit, urlunsplit
 from .ranking import RANKING_PROMPT
 
 
-TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
+TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens",
+                "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "reasoning_tokens")
 
 
 class LiveObserver:
@@ -83,6 +84,9 @@ class LiveObserver:
         if isinstance(usage, dict):
             for key in TOKEN_FIELDS:
                 value = usage.get(key)
+                if key == "reasoning_tokens":
+                    details = usage.get("completion_tokens_details")
+                    value = details.get(key) if isinstance(details, dict) else None
                 if type(value) is int and value >= 0:
                     self.tokens[key] = (self.tokens[key] or 0) + value
         fields = dict(external_id=notice.external_id, title=notice.title, duration_ms=duration_ms)
@@ -94,7 +98,7 @@ class LiveObserver:
         else:
             self.failed += 1
             preview = metadata.get("raw_output_preview")
-            self.emit("ranking_failed", **fields, error_type=type(error).__name__,
+            self.emit("ranking_failed", **fields, usage=usage, error_type=type(error).__name__,
                       error_message=str(error), **({"raw_output_preview": preview} if preview is not None else {}))
             label = "ERROR"
         title = " ".join((notice.title or "").split())

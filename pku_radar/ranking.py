@@ -59,7 +59,7 @@ class LLMRanker:
                    "preferences": {key: preferences.get(key, []) for key in
                                    ("primary_interests", "secondary_interests", "low_interest")},
                    "notice": {key: getattr(notice, key) for key in fields}}
-        body = {"model": self.model, "messages": [
+        body = {"model": self.model, "thinking": {"type": "disabled"}, "messages": [
             {"role": "system", "content": RANKING_PROMPT},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
         request = Request(self.base_url + "/chat/completions",
@@ -75,7 +75,13 @@ class LLMRanker:
                 if isinstance(usage, dict):
                     self.last_observation["usage"] = {
                         key: value if type(value := usage.get(key)) is int and value >= 0 else None
-                        for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+                        for key in ("prompt_tokens", "completion_tokens", "total_tokens",
+                                    "prompt_cache_hit_tokens", "prompt_cache_miss_tokens")}
+                    details = usage.get("completion_tokens_details")
+                    reasoning_tokens = details.get("reasoning_tokens") if isinstance(details, dict) else None
+                    self.last_observation["usage"]["completion_tokens_details"] = {
+                        "reasoning_tokens": reasoning_tokens
+                        if type(reasoning_tokens) is int and reasoning_tokens >= 0 else None}
                 content = payload["choices"][0]["message"]["content"]
         except Exception as exc:
             # Do not persist provider response bodies or request credentials in run logs.

@@ -123,6 +123,8 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(request.get_method(), "POST")
             body = json.loads(request.data)
             self.assertEqual(body["model"], "configured-model")
+            self.assertEqual(body["thinking"], {"type": "disabled"})
+            self.assertNotIn("reasoning_effort", body)
             payload = json.loads(body["messages"][1]["content"])
             self.assertEqual(payload["preferences"], PREFS)
             self.assertEqual(payload["current_datetime"], "2026-10-07T16:00:00+08:00")

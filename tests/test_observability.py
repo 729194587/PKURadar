@@ -64,7 +64,10 @@ class ObservabilityTests(unittest.TestCase):
         self.assertIn('primary_interests', events[0]['preferences'])
         ranks = [e for e in events if e['event'] == 'ranking_finished']
         self.assertEqual(len(ranks), 2)
-        self.assertEqual(ranks[0]['usage'], usage)
+        self.assertEqual(ranks[0]['usage'], dict(usage, prompt_cache_hit_tokens=None,
+                         prompt_cache_miss_tokens=None, completion_tokens_details={'reasoning_tokens': None}))
+        for field in ('prompt_cache_hit_tokens', 'prompt_cache_miss_tokens', 'reasoning_tokens'):
+            self.assertIsNone(events[-1][field])
         self.assertEqual(events[-1]['total_tokens'], 30)
         self.assertEqual(events[-1]['ranking_succeeded'], 2)
         self.assertIn('[source] page 1/3: 2 items, 0 bad', stderr)
@@ -79,7 +82,46 @@ class ObservabilityTests(unittest.TestCase):
         status, events, _, _ = self.live([self.output()])
         self.assertEqual(status, 0)
         self.assertIsNone(next(e for e in events if e['event'] == 'ranking_finished')['usage'])
-        for field in ('prompt_tokens', 'completion_tokens', 'total_tokens'):
+        for field in ('prompt_tokens', 'completion_tokens', 'total_tokens',
+                      'prompt_cache_hit_tokens', 'prompt_cache_miss_tokens', 'reasoning_tokens'):
+            self.assertIsNone(events[-1][field])
+
+    def test_cache_and_reasoning_usage_sums_reported_values_including_failures(self):
+        first = dict(prompt_tokens=10, completion_tokens=5, total_tokens=15,
+                     prompt_cache_hit_tokens=8, prompt_cache_miss_tokens=2,
+                     completion_tokens_details={'reasoning_tokens': 3})
+        second = dict(prompt_tokens=6, completion_tokens=2, total_tokens=8,
+                      prompt_cache_hit_tokens=0, prompt_cache_miss_tokens=6,
+                      completion_tokens_details={'reasoning_tokens': 0})
+        status, events, _, _ = self.live([
+            self.output(usage=first), self.output('invalid JSON', second), self.output()])
+        self.assertEqual(status, 1)
+        ranks = [e for e in events if e['event'] in ('ranking_finished', 'ranking_failed')]
+        self.assertEqual(ranks[0]['usage'], first)
+        self.assertEqual(ranks[1]['usage'], second)
+        self.assertIsNone(ranks[2]['usage'])
+        for field, expected in dict(prompt_tokens=16, completion_tokens=7, total_tokens=23,
+                                    prompt_cache_hit_tokens=8, prompt_cache_miss_tokens=8,
+                                    reasoning_tokens=3).items():
+            with self.subTest(field=field):
+                self.assertEqual(events[-1][field], expected)
+
+    def test_partial_usage_does_not_estimate_missing_or_invalid_counts(self):
+        status, events, _, _ = self.live([
+            self.output(usage={'prompt_cache_hit_tokens': 0, 'completion_tokens_details': {}}),
+            self.output(usage={'prompt_cache_hit_tokens': True, 'prompt_cache_miss_tokens': -1,
+                               'completion_tokens_details': {'reasoning_tokens': '4'}}),
+            self.output(usage={'completion_tokens_details': None})])
+        self.assertEqual(status, 0)
+        ranks = [e for e in events if e['event'] == 'ranking_finished']
+        self.assertEqual(ranks[0]['usage']['prompt_cache_hit_tokens'], 0)
+        self.assertIsNone(ranks[1]['usage']['prompt_cache_hit_tokens'])
+        for rank in ranks:
+            self.assertIsNone(rank['usage']['prompt_cache_miss_tokens'])
+            self.assertIsNone(rank['usage']['completion_tokens_details']['reasoning_tokens'])
+        self.assertEqual(events[-1]['prompt_cache_hit_tokens'], 0)
+        for field in ('prompt_tokens', 'completion_tokens', 'total_tokens',
+                      'prompt_cache_miss_tokens', 'reasoning_tokens'):
             self.assertIsNone(events[-1][field])
 
     def test_invalid_outputs_redacted_bounded_and_usage_includes_failures(self):
