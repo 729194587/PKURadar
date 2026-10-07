@@ -4,6 +4,7 @@ import os
 from dataclasses import asdict
 from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -12,6 +13,7 @@ from .models import Recommendation, timestamp
 
 RANKING_PROMPT = """判断这条 PKU 信息是否值得主动提醒当前用户，而不是总结文章。
 综合兴趣相关度、当前行动价值、是否值得出现在每日 Digest 中判断。
+current_datetime 使用 Asia/Shanghai 时区；PKU 活动和截止时间默认按 Asia/Shanghai 解读，除非通知明确指定其他时区。
 已明确结束的活动、已过报名或申请截止日期的信息不要推荐；活动回顾、新闻回顾通常不要推荐。
 实习、招聘、科研机会、招募、竞赛即使 upstream_is_event=false 仍可推荐，不要把该标签当事实过滤器。
 event_time_text 为空时不要臆造日期；时间不足时不要自动否决长期机会。
@@ -42,6 +44,8 @@ class LLMRanker:
         return cls(*(values[name] for name in names))
 
     def rank(self, notice, preferences, current_datetime):
+        timestamp(current_datetime)  # Reject naive datetimes before timezone conversion.
+        current_datetime = current_datetime.astimezone(ZoneInfo("Asia/Shanghai"))
         fields = ("title", "source_name", "category", "intent_group", "summary",
                   "upstream_is_event", "event_time_text", "event_location", "url")
         payload = {"current_datetime": timestamp(current_datetime),

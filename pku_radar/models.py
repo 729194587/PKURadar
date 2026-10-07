@@ -56,6 +56,8 @@ class Recommendation:
             raise ValueError("invalid priority")
         if result["recommend"] and priority is None:
             raise ValueError("recommended items require priority")
+        if not result["recommend"] and priority is not None:
+            raise ValueError("non-recommended items require null priority")
         reason = result.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("reason must be a nonempty string")

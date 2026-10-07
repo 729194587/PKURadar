@@ -211,6 +211,7 @@ class LifecycleTests(unittest.TestCase):
     def test_partial_and_invalid_outputs(self):
         invalid = [{}, {"recommend": 1}, {"recommend": True, "priority": None, "reason": "x"},
                    {"recommend": True, "priority": "urgent", "reason": "x"},
+                   {"recommend": False, "priority": "high", "reason": "x"},
                    {"recommend": False, "reason": " "}, {"recommend": False, "reason": 7}]
         for index, output in enumerate(invalid):
             with self.subTest(output=output):

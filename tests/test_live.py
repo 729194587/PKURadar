@@ -125,7 +125,9 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(body["model"], "configured-model")
             payload = json.loads(body["messages"][1]["content"])
             self.assertEqual(payload["preferences"], PREFS)
-            self.assertEqual(payload["current_datetime"], NOW.isoformat())
+            self.assertEqual(payload["current_datetime"], "2026-10-07T16:00:00+08:00")
+            self.assertIn("PKU 活动和截止时间默认按 Asia/Shanghai 解读，除非通知明确指定其他时区。",
+                          body["messages"][0]["content"])
             self.assertEqual(set(payload["notice"]), {"title", "source_name", "category", "intent_group",
                 "summary", "upstream_is_event", "event_time_text", "event_location", "url"})
 
